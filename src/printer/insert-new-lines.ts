@@ -1,5 +1,5 @@
 import {getObjectTypedKeys, ObjectValueType} from 'augment-vir';
-import {Node} from 'estree';
+import {CallExpression, Node} from 'estree';
 import {AstPath, Doc, doc, ParserOptions} from 'prettier';
 import {isDocCommand, stringifyDoc} from '../augments/doc';
 import {MultilineArrayOptions} from '../options';
@@ -9,7 +9,8 @@ import {
     getCommentTriggers,
     parseNextLineCounts,
 } from './comment-triggers';
-import {isArrayLikeNode} from './supported-node-types';
+import {insertLinesIntoArguments} from './insert-new-lines-into-arguments';
+import {isArgumentsLikeNode, isArrayLikeNode} from './supported-node-types';
 import {containsTrailingComma} from './trailing-comma';
 
 const nestingSyntaxOpen = '[{(`' as const;
@@ -17,7 +18,7 @@ const nestingSyntaxClose = ']})`' as const;
 
 const found = 'Found "[" but';
 
-function insertArrayLines(
+function insertLinesIntoArray(
     inputDoc: Doc,
     forceWrap: boolean,
     lineCounts: number[],
@@ -370,58 +371,80 @@ export function printWithMultilineArrays(
         );
     }
     const node = path.getValue() as Node | undefined;
-    if (node) {
-        if (isArrayLikeNode(node)) {
-            if (!node.loc) {
-                throw new Error(`Could not find location of node ${node.type}`);
-            }
-            const currentLine = node.loc.start.line;
-            const lastLine = currentLine - 1;
-            const commentTriggers = getCommentTriggers(rootNode, debug);
 
-            const originalText: string = inputOptions.originalText;
-
-            const includesTrailingComma = containsTrailingComma(
-                node,
-                originalText.split('\n'),
-                debug,
-            );
-
-            const forceWrap = includesTrailingComma;
-
-            const relevantSetLineCount: number[] | undefined = getLatestSetValue(
-                currentLine,
-                commentTriggers.setLineCounts,
-            );
-
-            const lineCounts: number[] =
-                commentTriggers.nextLineCounts[lastLine] ??
-                relevantSetLineCount ??
-                parseNextLineCounts(inputOptions.multilineArraysLinePattern, false, debug);
-
-            const relevantSetWrapThreshold = getLatestSetValue(
-                currentLine,
-                commentTriggers.setWrapThresholds,
-            );
-
-            const wrapThreshold: number =
-                commentTriggers.nextWrapThresholds[lastLine] ??
-                relevantSetWrapThreshold ??
-                inputOptions.multilineArraysWrapThreshold;
-
-            if (debug) {
-                console.info(`======= Starting call to ${insertArrayLines.name}: =======`);
-                console.info({options: {lineCounts, wrapThreshold}});
-            }
-            const newDoc = insertArrayLines(
-                originalFormattedOutput,
-                forceWrap,
-                lineCounts,
-                wrapThreshold,
-                debug,
-            );
-            return newDoc;
+    if (
+        node &&
+        (isArrayLikeNode(node) ||
+            (inputOptions.multilineFunctionArguments && isArgumentsLikeNode(node)))
+    ) {
+        if (!node.loc) {
+            throw new Error(`Could not find location of node ${node.type}`);
         }
+        const currentLineNumber = node.loc.start.line;
+        const lastLine = currentLineNumber - 1;
+        const commentTriggers = getCommentTriggers(rootNode, debug);
+
+        const originalText: string = inputOptions.originalText;
+
+        const includesTrailingComma = containsTrailingComma(
+            node.loc,
+            'arguments' in node
+                ? (node as CallExpression).arguments
+                : 'params' in node
+                ? node.params
+                : node.elements,
+            originalText.split('\n'),
+            debug,
+        );
+
+        const forceWrap = includesTrailingComma;
+
+        const relevantSetLineCount: number[] | undefined = getLatestSetValue(
+            currentLineNumber,
+            commentTriggers.setLineCounts,
+        );
+
+        const lineCounts: number[] =
+            commentTriggers.nextLineCounts[lastLine] ??
+            relevantSetLineCount ??
+            parseNextLineCounts(inputOptions.multilineArraysLinePattern, false, debug);
+
+        const relevantSetWrapThreshold = getLatestSetValue(
+            currentLineNumber,
+            commentTriggers.setWrapThresholds,
+        );
+
+        const wrapThreshold: number =
+            commentTriggers.nextWrapThresholds[lastLine] ??
+            relevantSetWrapThreshold ??
+            inputOptions.multilineArraysWrapThreshold;
+
+        if (debug) {
+            if (isArgumentsLikeNode(node)) {
+                console.info(`======= Starting call to ${insertLinesIntoArguments.name}: =======`);
+            } else {
+                console.info(`======= Starting call to ${insertLinesIntoArray.name}: =======`);
+            }
+            console.info({options: {lineCounts, wrapThreshold}});
+        }
+
+        const newDoc = isArgumentsLikeNode(node)
+            ? insertLinesIntoArguments(
+                  originalFormattedOutput,
+                  forceWrap,
+                  lineCounts,
+                  wrapThreshold,
+                  includesTrailingComma,
+                  debug,
+              )
+            : insertLinesIntoArray(
+                  originalFormattedOutput,
+                  forceWrap,
+                  lineCounts,
+                  wrapThreshold,
+                  debug,
+              );
+        return newDoc;
     }
 
     return originalFormattedOutput;

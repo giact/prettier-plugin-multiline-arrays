@@ -1,31 +1,67 @@
 import {capitalizeFirst} from '../augments/string';
-import {nextLinePatternComment, nextWrapThresholdComment} from '../options';
-import {MultilineArrayTest, runTests} from './run-tests';
+import {
+    nextLinePatternComment,
+    nextWrapThresholdComment,
+    resetComment,
+    setLinePatternComment,
+    setWrapThresholdComment,
+} from '../options';
+import {MultilineArrayTest} from './run-tests';
 
-const javascriptTests: MultilineArrayTest[] = [
+export const typescriptTests: MultilineArrayTest[] = [
     {
         name: 'comment at end of argument list with multiline array parser',
         // prettier-ignore
         code: `
-            export function hasProperty(
-                inputObject,
-                inputKey,
-                // this comment shouldn't get moved
-            ) {
+            export function hasProperty<ObjectGeneric extends object, KeyGeneric extends PropertyKey>(
+                inputObject: ObjectGeneric,
+                inputKey: KeyGeneric,
+                // @ts-ignore this type signature is actually exactly what I want
+            ): inputObject is ObjectGeneric extends Record<KeyGeneric, any>
+                ? Extract<ObjectGeneric, {[SubProperty in KeyGeneric]: unknown}>
+                : Record<KeyGeneric, unknown> {
                 return inputKey in inputObject;
             }
         `,
     },
     {
-        name: 'long args that wrap already',
+        name: 'works with greater than or less than inside of an array in typescript',
         code: `
-            doTheThing('super long argument to force some wrapping', 'super long argument to force some wrapping', 'super long argument to force some wrapping');
+            const thingie = [
+                otherThingie < 5 ? 'owl' : 'goat',
+            ];
+        `,
+        options: {
+            multilineArraysWrapThreshold: 0,
+        },
+    },
+    {
+        name: 'should not wrap a function call with just one argument',
+        code: `
+            doThing('what');
+        `,
+        options: {
+            multilineFunctionArguments: true,
+        },
+    },
+    {
+        name: 'should not wrap inner objects',
+        code: `
+            console.info({stdout: output.results.stdout});
+        `,
+        options: {
+            multilineFunctionArguments: true,
+        },
+    },
+    {
+        name: 'should wrap a function call with just two arguments',
+        code: `
+            doThing('what', 'who');
         `,
         expected: `
-            doTheThing(
-                'super long argument to force some wrapping',
-                'super long argument to force some wrapping',
-                'super long argument to force some wrapping',
+            doThing(
+                'what',
+                'who',
             );
         `,
         options: {
@@ -33,162 +69,240 @@ const javascriptTests: MultilineArrayTest[] = [
         },
     },
     {
-        // caught
-        name: 'arguments in function call',
+        name: 'should not wrap a function definition with just one argument',
         code: `
-            doTheThing('a123', 'b123', 'c123');
-        `,
-        expected: `
-            doTheThing(
-                'a123',
-                'b123',
-                'c123',
-            );
+            function mapToActualPaths(
+                paths: Readonly<string[]>,
+            ): Readonly<string[]> {}
         `,
         options: {
             multilineFunctionArguments: true,
         },
     },
     {
-        // caught
-        name: 'assigned function call',
+        name: 'works with a whole file of code that was failing',
         code: `
-            const output = doThing('a9', 'b999');
-        `,
-        expected: `
-        const output = doThing(
-                'a9',
-                'b999',
-            );
+            import {assert} from 'chai';
+            import {basename} from 'path';
+            
+            describe(basename(__filename), () => {
+                it('should have a valid test', () => {
+                    assert.isTrue(true);
+                });
+            });
         `,
         options: {
             multilineFunctionArguments: true,
         },
     },
     {
-        name: 'require call',
+        name: 'should work with multiple nested arrays',
         code: `
-            const output = require('path/to/thing');
+            const thingie = [
+                [
+                    1,
+                    2,
+                    3,
+                ],
+                [
+                    4,
+                    5,
+                    6,
+                    0,
+                ],
+                [
+                    7,
+                    8,
+                    9,
+                ],
+                [10],
+            ];
         `,
         expected: `
-            const output = require('path/to/thing');
+            const thingie = [
+                [
+                    1,
+                    2,
+                    3,
+                ],
+                [
+                    4,
+                    5,
+                    6,
+                    0,
+                ],
+                [
+                    7,
+                    8,
+                    9,
+                ],
+                [
+                    10,
+                ],
+            ];
         `,
         options: {
-            multilineFunctionArguments: true,
+            multilineArraysWrapThreshold: 0,
         },
     },
     {
-        name: 'single arg arrow function',
+        name: 'forces array wrapping if a trailing comma is used',
         code: `
-            const stuff = process.argv.some((argP) => argO.match(/\.tsq?$/));
+            const myArray = [1, 2, 3,];
         `,
         expected: `
-            const stuff = process.argv.some((argP) => argO.match(/\.tsq?$/));
+            const myArray = [
+                1,
+                2,
+                3,
+            ];
         `,
         options: {
-            multilineFunctionArguments: true,
+            multilineArraysWrapThreshold: 10,
         },
     },
     {
-        // caught argB
-        // caught tsg tons of times
-        name: 'multi arg arrow function with call in callback',
+        name: 'an array without wrapping should only take up one line',
         code: `
-            const stuff = process.argv.some((argB, indexB) => argC.match(/\.tsg?$/));
+            // ${nextWrapThresholdComment} 8
+            const flatArray = [0, 0, 0, 1, 1];
         `,
-        expected: `
-            const stuff = process.argv.some(
-                (
-                    argB,
-                    indexB,
-                ) => argC.match(/\.tsg?$/)
-            );
+    },
+    {
+        name: 'a nested array without wrapping should only take up one line',
+        code: `
+            const flatNestedArray = [
+                // ${nextWrapThresholdComment} 8
+                [0, 0, 0, 1, 1],
+                // ${nextWrapThresholdComment} 8
+                [0, 0, 0, 1, 1],
+                // ${nextWrapThresholdComment} 8
+                [0, 0, 0, 1, 1],
+                // ${nextWrapThresholdComment} 8
+                [0, 0, 0, 1, 1],
+                // ${nextWrapThresholdComment} 8
+                [0, 0, 0, 1, 1],
+            ];
         `,
-        exclude: true,
         options: {
-            multilineFunctionArguments: true,
+            multilineArraysWrapThreshold: 0,
         },
     },
     {
-        name: 'multi arg arrow function',
-        exclude: true,
+        name: 'set wrap threshold should carry through',
         code: `
-            const stuff = process.argv.some((arg2, index3) => arg1);
-        `,
-        expected: `
-            const stuff = process.argv.some(
-                (
-                    arg2,
-                    index3,
-                ) => arg1,
-            );
+            const flatNestedArray = [
+                // ${setWrapThresholdComment} 8
+                [0, 0, 0, 1, 1],
+                [0, 0, 0, 1, 1],
+                [0, 0, 0, 1, 1],
+                [0, 0, 0, 1, 1],
+                [0, 0, 0, 1, 1],
+            ];
         `,
         options: {
-            multilineFunctionArguments: true,
+            multilineArraysWrapThreshold: 0,
         },
     },
     {
-        name: 'tons of args in arrow function',
+        name: 'next line comments should override set comments and trailing commas should still work',
         code: `
-            const stuff = process.argv.some((reallyReallyReallyReallyReallyReallyReallyLong, reallyReallyReallyReallyReallyReallyReallyLong, reallyReallyReallyReallyReallyReallyReallyLong) => arg.match(/\.tsx?$/));
+            const flatNestedArray = [
+                // ${setWrapThresholdComment} 8
+                [0, 0, 0, 1, 1],
+                [0, 0, 0, 1, 1],
+                // ${nextWrapThresholdComment} 2
+                [
+                    0,
+                    0,
+                    0,
+                    1,
+                    1,
+                ],
+                // has trailing comma
+                [0, 0, 0, 1, 1,],
+                [0, 0, 0, 1, 1],
+                [0, 0, 0, 1, 1, 0, 1, 1, 1],
+            ];
         `,
         expected: `
-            const stuff = process.argv.some(
-                (
-                    reallyReallyReallyReallyReallyReallyReallyLong,
-                    reallyReallyReallyReallyReallyReallyReallyLong,
-                    reallyReallyReallyReallyReallyReallyReallyLong,
-                ) => arg.match(/\.tsx?$/),
-            );
+            const flatNestedArray = [
+                // ${setWrapThresholdComment} 8
+                [0, 0, 0, 1, 1],
+                [0, 0, 0, 1, 1],
+                // ${nextWrapThresholdComment} 2
+                [
+                    0,
+                    0,
+                    0,
+                    1,
+                    1,
+                ],
+                // has trailing comma
+                [
+                    0,
+                    0,
+                    0,
+                    1,
+                    1,
+                ],
+                [0, 0, 0, 1, 1],
+                [
+                    0,
+                    0,
+                    0,
+                    1,
+                    1,
+                    0,
+                    1,
+                    1,
+                    1,
+                ],
+            ];
         `,
         options: {
-            multilineFunctionArguments: true,
+            multilineArraysWrapThreshold: 0,
         },
     },
     {
-        name: 'arguments in new constructor call',
+        name: 'does not force array wrapping if a trailing comma is not used',
         code: `
-            new doTheThing('aq', 'bq', 'cq');
-        `,
-        expected: `
-            new doTheThing(
-                'aq',
-                'bq',
-                'cq',
-            );
+            const myArray = [1, 2, 3];
         `,
         options: {
-            multilineFunctionArguments: true,
+            multilineArraysWrapThreshold: 10,
         },
     },
     {
-        name: 'arguments in function definition',
+        name: 'works with array expansion in function parameters',
         code: `
-            function doTheThing(a1, b2, c3) {};
-        `,
-        expected: `
-            function doTheThing(
-                a1,
-                b2,
-                c3,
+            export function update(
+                partInfo: PartInfo,
+                [
+                    callback,
+                ]: [
+                    OnOsThemeChangeCallback,
+                ],
             ) {}
         `,
         options: {
-            multilineFunctionArguments: true,
+            multilineArraysWrapThreshold: 10,
         },
     },
     {
-        name: 'arguments in function definition no wrap when below threshold',
+        name: 'works with array expansion in function parameters with multiple entries',
         code: `
-            function doTheThing(aa, bb, cc) {};
+            export function update(
+                partInfo: PartInfo,
+                [
+                    callback,
+                    otherThing,
+                ]: [
+                    OnOsThemeChangeCallback,
+                    OtherThingHereToo,
+                ],
+            ) {}
         `,
-        expected: `
-            function doTheThing(aa, bb, cc) {}
-        `,
-        options: {
-            multilineFunctionArguments: true,
-            multilineArraysWrapThreshold: 10,
-        },
     },
     {
         name: 'basic wrap threshold comment',
@@ -198,10 +312,29 @@ const javascriptTests: MultilineArrayTest[] = [
         `,
     },
     {
-        name: 'works with greater than or less than inside of an array in javascript',
+        name: 'still wraps really long text below the threshold',
         code: `
-            const thingie = [
-                otherThingie < 5 ? 'owl' : 'goat',
+            // ${nextWrapThresholdComment} 3
+            const thingieArray = ['HelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHello'];
+        `,
+        expected: `
+            // ${nextWrapThresholdComment} 3
+            const thingieArray = [
+                'HelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHello',
+            ];
+        `,
+    },
+    {
+        name: 'does not wrap really long text when the line count prevents it',
+        code: `
+            // ${nextLinePatternComment} 1 3
+            const thingieArray = ['hello', 'hello', 'HelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHello', 'HelloHelloHelloHelloHelloHelloHelloHelloHelloHello'];
+        `,
+        expected: `
+            // ${nextLinePatternComment} 1 3
+            const thingieArray = [
+                'hello',
+                'hello', 'HelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHelloHello', 'HelloHelloHelloHelloHelloHelloHelloHelloHelloHello',
             ];
         `,
     },
@@ -241,6 +374,27 @@ const javascriptTests: MultilineArrayTest[] = [
         `,
         options: {
             multilineArraysLinePattern: '1 2 3',
+        },
+    },
+    {
+        name: 'invalid elements per line reverts to default',
+        code: `
+            const thingieArray = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+        `,
+        expected: `
+            const thingieArray = [
+                'a',
+                'b',
+                'c',
+                'd',
+                'e',
+                'f',
+                'g',
+                'h',
+            ];
+        `,
+        options: {
+            multilineArraysLinePattern: '1 2 3 fff',
         },
     },
     {
@@ -296,21 +450,215 @@ const javascriptTests: MultilineArrayTest[] = [
         // prettier-ignore
         code: `
             // ${nextLinePatternComment} 2
-            const originalArray = [
+            const originalArray: Readonly<number[]> = [
                 0,
                 1,
                 2,
                 3,
                 4,
-            ];
+            ] as const;
         `,
         expected: `
             // ${nextLinePatternComment} 2
-            const originalArray = [
+            const originalArray: Readonly<number[]> = [
                 0, 1,
                 2, 3,
                 4,
+            ] as const;
+        `,
+    },
+    {
+        name: 'set line pattern comment should carry through',
+        // prettier-ignore
+        code: `
+            // ${setLinePatternComment} 2
+            const originalArray: Readonly<number[]> = [
+                0,
+                1,
+                2,
+                3,
+                4,
+            ] as const;
+            const originalArray2: Readonly<number[]> = [
+                0,
+                1,
+                2,
+                3,
+                4,
+            ] as const;
+        `,
+        expected: `
+            // ${setLinePatternComment} 2
+            const originalArray: Readonly<number[]> = [
+                0, 1,
+                2, 3,
+                4,
+            ] as const;
+            const originalArray2: Readonly<number[]> = [
+                0, 1,
+                2, 3,
+                4,
+            ] as const;
+        `,
+    },
+    {
+        name: 'should set array threshold for all array elements',
+        code: `
+            // ${setWrapThresholdComment} 8
+            const thing = [
+                [
+                    0,
+                    0,
+                    0,
+                    1,
+                    1
+                ],
+                [
+                    0,
+                    0,
+                    1,
+                    1,
+                    0
+                ],
+                [
+                    0,
+                    1,
+                    1,
+                    0,
+                    0
+                ],
+                [
+                    1,
+                    1,
+                    0,
+                    0,
+                    0
+                ],
+                [
+                    1,
+                    1,
+                    0,
+                    0,
+                    0
+                ],
+                [
+                    0,
+                    1,
+                    1,
+                    0,
+                    0
+                ],
+                [
+                    0,
+                    0,
+                    1,
+                    1,
+                    0
+                ],
+                [
+                    0,
+                    0,
+                    0,
+                    1,
+                    1
+                ]
             ];
+        `,
+        expected: `
+            // ${setWrapThresholdComment} 8
+            const thing = [
+                [0, 0, 0, 1, 1],
+                [0, 0, 1, 1, 0],
+                [0, 1, 1, 0, 0],
+                [1, 1, 0, 0, 0],
+                [1, 1, 0, 0, 0],
+                [0, 1, 1, 0, 0],
+                [0, 0, 1, 1, 0],
+                [0, 0, 0, 1, 1],
+            ];
+        `,
+    },
+    {
+        name: 'line pattern comments should override options property',
+        code: `
+            const pl = [
+                'prettier-plugin-sort-json', 'prettier-plugin-packagejson',
+                'prettier-plugin-multiline-arrays', 'prettier-plugin-organize-imports', 'prettier-plugin-jsdoc',
+            ];
+          
+            // ${nextLinePatternComment} 2 1
+            const availableTags = [
+                'a', 'aside', 'b', 'blockquote', 'br', 'code', 'em', 'figcaption', 'figure', 'h3', 'h4', 'hr', 'i', 'iframe', 'img', 'li', 'ol', 'p', 'pre', 's', 'strong', 'u', 'ul', 'video',
+                'table'
+            ]
+        `,
+        expected: `
+            const pl = [
+                'prettier-plugin-sort-json', 'prettier-plugin-packagejson', 'prettier-plugin-multiline-arrays',
+                'prettier-plugin-organize-imports', 'prettier-plugin-jsdoc',
+            ];
+            
+            // ${nextLinePatternComment} 2 1
+            const availableTags = [
+                'a', 'aside',
+                'b',
+                'blockquote', 'br',
+                'code',
+                'em', 'figcaption',
+                'figure',
+                'h3', 'h4',
+                'hr',
+                'i', 'iframe',
+                'img',
+                'li', 'ol',
+                'p',
+                'pre', 's',
+                'strong',
+                'u', 'ul',
+                'video',
+                'table',
+            ];
+        `,
+        options: {
+            multilineArraysLinePattern: '3',
+        },
+    },
+    {
+        name: 'reset should clear set comment',
+        // prettier-ignore
+        code: `
+            // ${setLinePatternComment} 2
+            const originalArray: Readonly<number[]> = [
+                0,
+                1,
+                2,
+                3,
+                4,
+            ] as const;
+            // ${resetComment}
+            const originalArray2: Readonly<number[]> = [
+                0,
+                1,
+                2,
+                3,
+                4,
+            ] as const;
+        `,
+        expected: `
+            // ${setLinePatternComment} 2
+            const originalArray: Readonly<number[]> = [
+                0, 1,
+                2, 3,
+                4,
+            ] as const;
+            // ${resetComment}
+            const originalArray2: Readonly<number[]> = [
+                0,
+                1,
+                2,
+                3,
+                4,
+            ] as const;
         `,
     },
     {
@@ -319,23 +667,23 @@ const javascriptTests: MultilineArrayTest[] = [
         code: `
             describe(filterMap.name, () => {
                 // ${nextLinePatternComment} 2
-                const originalArray = [
+                const originalArray: Readonly<number[]> = [
                     0,
                     1,
                     2,
                     3,
                     4,
-                ];
+                ] as const;
             });
         `,
         expected: `
             describe(filterMap.name, () => {
                 // ${nextLinePatternComment} 2
-                const originalArray = [
+                const originalArray: Readonly<number[]> = [
                     0, 1,
                     2, 3,
                     4,
-                ];
+                ] as const;
             });
         `,
     },
@@ -353,7 +701,7 @@ const javascriptTests: MultilineArrayTest[] = [
             
                 {
                     innerStuff: \`
-                        const myVar = {a: 'where', b: 'everywhere'};
+                        const myVar: object = {a: 'where', b: 'everywhere'};
                     \`,
                 },
             ];
@@ -363,7 +711,7 @@ const javascriptTests: MultilineArrayTest[] = [
             const stuff = [
                 {
                     innerStuff: \`
-                        const myVar = {a: 'where', b: 'everywhere'};
+                        const myVar: object = {a: 'where', b: 'everywhere'};
                     \`,
                 },
             ];
@@ -374,12 +722,12 @@ const javascriptTests: MultilineArrayTest[] = [
         // prettier-ignore
         code: `
             export async function selectFiles(
-                inputProperties = [
+                inputProperties: OpenDialogProperty[] = [
                     OpenDialogProperty.multiSelections,
                     OpenDialogProperty.openFile,
                     OpenDialogProperty.openDirectory,
                 ],
-            ) {}
+            ): Promise<undefined | string[]> {}
         `,
     },
     {
@@ -431,9 +779,11 @@ const javascriptTests: MultilineArrayTest[] = [
         // prettier-ignore
         code: `
             expose({
-                versions,
-                apiRequest: async (details) => {
-                    async function waitForResponse() {
+                versions: process.versions,
+                apiRequest: async (
+                    details: ApiRequestDetails<ApiRequestType>,
+                ): Promise<ApiFullResponse<ApiRequestType>> => {
+                    async function waitForResponse(): Promise<ApiFullResponse<ApiRequestType>> {
                         return new Promise((resolve) => {
                             ipcRenderer.once(
                                 getApiResponseEventName(details.type, requestId),
@@ -448,11 +798,94 @@ const javascriptTests: MultilineArrayTest[] = [
         `,
     },
     {
-        name: 'function parameters',
-        // prettier-ignore
+        name: 'arguments in function call',
         code: `
             doTheThing('a', 'b', 'c');
         `,
+        expected: `
+            doTheThing(
+                'a',
+                'b',
+                'c',
+            );
+        `,
+        options: {
+            multilineFunctionArguments: true,
+        },
+    },
+    {
+        name: 'single arg arrow function',
+        code: `
+            const stuff = process.argv.some((arg) => arg.match(/\.tsx?$/));
+        `,
+        expected: `
+            const stuff = process.argv.some((arg) => arg.match(/\.tsx?$/));
+        `,
+        options: {
+            multilineFunctionArguments: true,
+        },
+    },
+    // {
+    //     name: 'multi arg arrow function',
+    //     code: `
+    //         const stuff = process.argv.some((arg: something, index: anotherThing) => arg.match(/\.tsx?$/));
+    //     `,
+    //     expected: `
+    //         const stuff = process.argv.some(
+    //             (
+    //                 arg: something,
+    //                 index: anotherThing,
+    //             ) => arg.match(/\.tsx?$/)
+    //         );
+    //     `,
+    //     options: {
+    //         multilineFunctionArguments: true,
+    //     },
+    // },
+    {
+        name: 'arguments in new constructor call',
+        code: `
+            new doTheThing('a', 'b', 'c');
+        `,
+        expected: `
+            new doTheThing(
+                'a',
+                'b',
+                'c',
+            );
+        `,
+        options: {
+            multilineFunctionArguments: true,
+        },
+    },
+    {
+        name: 'arguments in function definition',
+        code: `
+            function doTheThing(a: string, b: string, c: string) {};
+        `,
+        expected: `
+            function doTheThing(
+                a: string,
+                b: string,
+                c: string,
+            ) {}
+        `,
+        options: {
+            multilineFunctionArguments: true,
+        },
+    },
+    {
+        name: 'arguments in function definition no wrap when below threshold',
+        code: `
+            function doTheThing(a: string, b: string, c: string) {};
+        `,
+        expected: `
+            function doTheThing(a: string, b: string, c: string) {}
+        `,
+        options: {
+            multilineFunctionArguments: true,
+            multilineArraysWrapThreshold: 10,
+        },
     },
     {
         name: 'config object',
@@ -855,7 +1288,3 @@ const javascriptTests: MultilineArrayTest[] = [
         `,
     },
 ];
-
-describe('javascript multiline array formatting', () => {
-    runTests('.js', javascriptTests);
-});
